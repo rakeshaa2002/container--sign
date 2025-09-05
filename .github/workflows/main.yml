@@ -1,67 +1,93 @@
-name: Build, Sign and Verify Container
+name: Build, Push & Sign (GHCR)
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write   # ✅ Needed for OIDC keyless signing
+  packages: write    # Needed to push to GHCR
+  id-token: write    # Needed for keyless signing via OIDC
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}  # format: owner/repo
 
 jobs:
-  build-sign-verify:
+  docker:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repo
-      - name: Checkout
+      # 1️⃣ Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Set up Docker Buildx
-      - name: Set up Docker Buildx
+      # 2️⃣ Setup QEMU (multi-arch)
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 3️⃣ Setup Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Log in to GHCR
-      - name: Log in to GHCR
+      # 4️⃣ Login to GHCR
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build & Push container image
-      - name: Build and Push
+      # 5️⃣ Generate metadata (tags, labels)
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # 6️⃣ Build & push multi-arch image
+      - name: Build and Push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,digest=sha256
 
-      # Install cosign v2.3.0 (overwrite old version)
-      - name: Install latest cosign
-        run: |
-          COSIGN_VERSION="v2.3.0"
-          curl -sSL -o cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
-          chmod +x cosign
-          sudo mv cosign /usr/local/bin/cosign
-          /usr/local/bin/cosign version
+      # 7️⃣ Install Cosign
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
 
-      # Sign the container image (keyless OIDC)
-      - name: Sign container image
+      # 8️⃣ Sign the image (keyless via OIDC)
+      - name: Sign the Docker image
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          /usr/local/bin/cosign sign --yes \
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          echo "Signing image ${IMAGE}@${DIGEST}..."
+          cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # Verify the signature with --certificate-identity-regex
-      - name: Verify signature
+      # 9️⃣ Verify the signature
+      - name: Verify Docker image signature
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          /usr/local/bin/cosign version   # should show v2.3.0
-          /usr/local/bin/cosign verify \
-            --certificate-identity-regex "https://github.com/${{ github.repository }}/.*" \
+          echo "Verifying image ${IMAGE}@${DIGEST}..."
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            "${IMAGE}@${DIGEST}"
