@@ -42,10 +42,10 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      # ✅ Force install latest cosign (overwrite old version)
+      # ✅ Install cosign v2.3.0 (overwrite old version)
       - name: Install latest cosign
         run: |
-          COSIGN_VERSION="v2.2.4"
+          COSIGN_VERSION="v2.3.0"
           curl -sSL -o cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
           chmod +x cosign
           sudo mv cosign /usr/local/bin/cosign
@@ -57,10 +57,10 @@ jobs:
           cosign sign --yes \
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      # Verify the signature (✅ now works because cosign v2.2.4+ is installed)
+      # Verify the signature with --certificate-identity-regex
       - name: Verify signature
         run: |
-          cosign version   # should show v2.2.4
+          cosign version   # should show v2.3.0
           cosign verify \
             --certificate-identity-regex "https://github.com/${{ github.repository }}/.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
