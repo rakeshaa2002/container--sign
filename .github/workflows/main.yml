@@ -42,26 +42,26 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      # ✅ Install cosign v2.3.0 (overwrite old version)
+      # Install cosign v2.3.0 (overwrite old version)
       - name: Install latest cosign
         run: |
           COSIGN_VERSION="v2.3.0"
           curl -sSL -o cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
           chmod +x cosign
           sudo mv cosign /usr/local/bin/cosign
-          cosign version
+          /usr/local/bin/cosign version
 
       # Sign the container image (keyless OIDC)
       - name: Sign container image
         run: |
-          cosign sign --yes \
+          /usr/local/bin/cosign sign --yes \
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       # Verify the signature with --certificate-identity-regex
       - name: Verify signature
         run: |
-          cosign version   # should show v2.3.0
-          cosign verify \
+          /usr/local/bin/cosign version   # should show v2.3.0
+          /usr/local/bin/cosign verify \
             --certificate-identity-regex "https://github.com/${{ github.repository }}/.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             ghcr.io/${{ github.repository }}:${{ github.sha }}
